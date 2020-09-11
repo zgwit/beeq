@@ -93,7 +93,7 @@ func Decode(buf []byte) (Message, int, error) {
 		l, err := msg.Decode(buf)
 		return msg, l, err
 	} else {
-		return nil, 0, fmt.Errorf("Unknown messege type")
+		return nil, 0, fmt.Errorf("unknown messege type %d", mt)
 	}
 }
 
