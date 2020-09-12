@@ -1,7 +1,7 @@
 package beeq
 
 import (
-	uuid "github.com/satori/go.uuid"
+	uuid "github.com/google/uuid"
 	"github.com/zgwit/beeq/packet"
 	"log"
 	"net"
@@ -71,7 +71,7 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 
 		// Generate unique clientId (uuid random)
 		for {
-			clientId = uuid.NewV4().String()
+			clientId = uuid.New().String()
 			if _, ok := h.bees.Load(clientId); !ok {
 				break
 			}
