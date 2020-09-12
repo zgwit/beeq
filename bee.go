@@ -44,19 +44,6 @@ func NewBee(conn net.Conn, hive *Hive) *Bee {
 	}
 }
 
-func (b *Bee) Active() {
-	b.alive = true
-
-	go b.receiver()
-}
-
-func (b *Bee) Shutdown() {
-	b.alive = false
-
-	// Tell hive delete me
-	b.hive.Event(NewEvent(E_LOST_CONN, nil, b))
-	//b.hive.bees.Delete(b.clientId)
-}
 
 func (b *Bee) recv(buf []byte) (int, error) {
 	err := b.conn.SetReadDeadline(time.Now().Add(b.timeout))
@@ -79,7 +66,6 @@ func (b *Bee) receiver() {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Print("b receiver panic ", r)
-			b.Shutdown()
 		}
 	}()
 
@@ -136,10 +122,7 @@ func (b *Bee) receiver() {
 		}
 	}
 
-	//Shutdown b
-	if b.alive {
-		b.Shutdown()
-	}
+	b.conn = nil
 }
 
 func (b *Bee) handleMessage(msg packet.Message) {
