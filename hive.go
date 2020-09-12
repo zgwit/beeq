@@ -28,31 +28,14 @@ func NewHive() *Hive {
 	}
 }
 
-//func (hive *Hive) messenger() {
-//	for {
-//		select {
-//		case <-hive.quit:
-//			break
-//		case event := <-hive.events:
-//			switch event.event {
-//			case E_CLOSE:
-//				hive.Shutdown()
-//			case E_LOST_CONN:
-//				hive.handleLostConn(event.from.(*Bee))
-//			case E_CONNECT:
-//				hive.handleConnect(event.data.(*packet.Connect), event.from.(*Bee))
-//			case E_PUBLISH:
-//				hive.handlePublish(event.data.(*packet.Publish), event.from.(*Bee))
-//			case E_SUBSCRIBE:
-//				hive.handleSubscribe(event.data.(*packet.Subscribe), event.from.(*Bee))
-//			case E_UNSUBSCRIBE:
-//				hive.handleUnSubscribe(event.data.(*packet.UnSubscribe), event.from.(*Bee))
-//			case E_DISCONNECT:
-//				hive.handleDisconnect(event.data.(*packet.DisConnect), event.from.(*Bee))
-//			}
-//		}
-//	}
-//}
+func (h *Hive) ListenAndServe(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	h.Serve(ln)
+	return nil
+}
 
 func (h *Hive) Serve(ln net.Listener) {
 	for {
@@ -63,14 +46,13 @@ func (h *Hive) Serve(ln net.Listener) {
 		}
 
 		//process
-		go h.receive(conn)
+		go h.Receive(conn)
 	}
 }
 
-func (h *Hive) receive(conn net.Conn) {
-
-
-
+func (h *Hive) Receive(conn net.Conn) {
+	b := NewBee(conn, h)
+	go b.receiver()
 }
 
 func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
@@ -81,9 +63,10 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 
 	var clientId string
 	if len(msg.ClientId()) == 0 {
+
 		if !msg.CleanSession() {
-			//error
-			return
+			//TODO 无ID，必须是清空会话 error
+			//return
 		}
 
 		// Generate unique clientId (uuid random)
@@ -96,45 +79,39 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 	} else {
 		clientId = string(msg.ClientId())
 
-		if bee, ok := h.bees.Load(clientId); ok {
+		if v, ok := h.bees.Load(clientId); ok {
+			b := v.(*Bee)
 			// ClientId is already used
-			if bee.Alive() {
+			if b.conn != nil {
 				//error reject
 				ack.SetCode(packet.CONNACK_UNAVAILABLE)
-
 				return
 			} else {
-				if msg.CleanSession() {
-					h.bees.Delete(clientId)
-				} else {
-					bee.Active(bee)
+				if !msg.CleanSession() {
+					//TODO 复制内容
+					bee.keepAlive = b.keepAlive
+					bee.will = b.will
+					bee.pub1 = b.pub1 //sync.Map不能直接复制。。。。
+					bee.pub2 = b.pub2
+					bee.recvPub2 = b.recvPub2
+					bee.packetId = b.packetId
 				}
 			}
 		}
+
+		h.bees.Store(clientId, bee)
 	}
 
-	log.Println(clientId, " Connected")
-
-	// Generate session
-	if _, ok := h.bees[clientId]; !ok {
-		session := NewSession()
-		h.bees[clientId] = session
-	} else {
-		ack.SetSessionPresent(true)
-	}
-
-	h.bees[clientId].bee = bee
-	h.bees[clientId].clientId = clientId
 	bee.clientId = clientId
-	bee.session = h.bees[clientId]
+
 	if msg.KeepAlive() > 0 {
 		bee.timeout = time.Second * time.Duration(msg.KeepAlive()) * 3 / 2
 	}
 
-	ack.SetCode(packet.CONNACK_ACCEPTED)
-	bee.Send(ack.Encode())
+	//ack.SetCode(packet.CONNACK_ACCEPTED)
+	bee.dispatchMessage(ack)
 
-	bee.Event(NewEvent(E_DISPATCH, ack, h))
+	//TODO 如果发生错误，与客户端断开连接
 }
 
 func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
@@ -158,52 +135,52 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 
 	//Send publish message
 	for clientId, qos := range subs {
-		if session, ok := h.bees[clientId]; ok && session.alive {
-			bee := session.bee
+		if b, ok := h.bees.Load(clientId); ok {
+			bb := b.(*Bee)
+			if bb.conn == nil {
+				continue
+			}
+
 			//clone new pub
 			pub := *msg
 			pub.SetRetain(false)
-			if msg.Qos() <= qos {
-				bee.Event(NewEvent(E_DISPATCH, &pub, h))
-			} else {
+			if msg.Qos() > qos {
 				pub.SetQos(qos)
-				bee.Event(NewEvent(E_DISPATCH, &pub, h))
 			}
+			bb.dispatchMessage(&pub)
 		}
 	}
 }
 
 func (h *Hive) handleSubscribe(msg *packet.Subscribe, bee *Bee) {
-	suback := packet.SUBACK.NewMessage().(*packet.SubAck)
-	suback.SetPacketId(msg.PacketId())
+	ack := packet.SUBACK.NewMessage().(*packet.SubAck)
+	ack.SetPacketId(msg.PacketId())
 	for _, st := range msg.Topics() {
 		log.Print("Subscribe ", string(st.Topic()))
 		if err := ValidSubscribe(st.Topic()); err != nil {
-			log.Print("Invalid topic ", err)
+			log.Println("Invalid topic ", err)
 			//log error
-			suback.AddCode(packet.SUB_CODE_ERR)
+			ack.AddCode(packet.SUB_CODE_ERR)
 		} else {
 			h.subTree.Subscribe(st.Topic(), bee.clientId, st.Qos())
 
-			suback.AddCode(packet.SubCode(st.Qos()))
+			ack.AddCode(packet.SubCode(st.Qos()))
 			h.retainTree.Fetch(st.Topic(), func(clientId string, pub *packet.Publish) {
 				//clone new pub
 				p := *pub
 				p.SetRetain(true)
-				if msg.Qos() <= st.Qos() {
-					bee.Event(NewEvent(E_DISPATCH, &p, h))
-				} else {
+				if msg.Qos() > st.Qos() {
 					p.SetQos(st.Qos())
-					bee.Event(NewEvent(E_DISPATCH, &p, h))
 				}
+				bee.dispatchMessage(&p)
 			})
 		}
 	}
-	bee.Event(NewEvent(E_DISPATCH, suback, h))
+	bee.dispatchMessage(ack)
 }
 
 func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
-	unsuback := packet.UNSUBACK.NewMessage().(*packet.UnSubAck)
+	ack := packet.UNSUBACK.NewMessage().(*packet.UnSubAck)
 	for _, t := range msg.Topics() {
 		log.Print("UnSubscribe ", string(t))
 		if err := ValidSubscribe(t); err != nil {
@@ -212,9 +189,10 @@ func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
 			h.subTree.UnSubscribe(t, bee.clientId)
 		}
 	}
-	bee.Event(NewEvent(E_DISPATCH, unsuback, h))
+	bee.dispatchMessage(ack)
 }
 
 func (h *Hive) handleDisconnect(msg *packet.DisConnect, bee *Bee) {
-	bee.Event(NewEvent(E_CLOSE, nil, h))
+	h.bees.Delete(bee.clientId)
+	_ = bee.conn.Close()
 }

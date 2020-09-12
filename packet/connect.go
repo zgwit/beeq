@@ -29,6 +29,7 @@ type Connect struct {
 	keepAlive uint16
 
 	clientId    []byte
+
 	willTopic   []byte
 	willMessage []byte
 
