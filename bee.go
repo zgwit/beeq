@@ -63,11 +63,11 @@ func (b *Bee) send(buf []byte) (int, error) {
 
 func (b *Bee) receiver() {
 	//Abort error
-	defer func() {
-		if r := recover(); r != nil {
-			log.Print("b receiver panic ", r)
-		}
-	}()
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		log.Print("b receiver panic ", r)
+	//	}
+	//}()
 
 
 	readHead := true
@@ -102,7 +102,7 @@ func (b *Bee) receiver() {
 		if !readHead && offset >= total {
 			readHead = true
 			bb := Alloc(6)
-			if msg, l, err := packet.Decode(bb); err != nil {
+			if msg, l, err := packet.Decode(buf); err != nil {
 				//TODO log err
 				log.Println("", err)
 				offset = 0 //clear data
