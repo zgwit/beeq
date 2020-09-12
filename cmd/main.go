@@ -1,6 +1,6 @@
 package main
 
-import "github.com/zgwit/beeq"
+import "git.zgwit.com/iot/beeq"
 
 func main()  {
 

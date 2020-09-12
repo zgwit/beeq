@@ -2,7 +2,7 @@ package beeq
 
 import (
 	"encoding/binary"
-	"github.com/zgwit/beeq/packet"
+	"git.zgwit.com/iot/beeq/packet"
 	"log"
 	"net"
 	"sync"

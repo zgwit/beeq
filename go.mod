@@ -1,4 +1,4 @@
-module github.com/zgwit/beeq
+module git.zgwit.com/iot/beeq
 
 go 1.13
 
