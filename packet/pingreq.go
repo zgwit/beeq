@@ -14,7 +14,7 @@ func (msg *PingReq) Decode(buf []byte) error {
 	//Tips. remain length is fixed 0 & total is fixed 2
 	total := len(buf)
 	if total < 2 {
-		return 0, fmt.Errorf("Ping expect fixed 2 bytes, got %d", total)
+		return fmt.Errorf("Ping expect fixed 2 bytes, got %d", total)
 	}
 
 	offset := 0
@@ -27,7 +27,7 @@ func (msg *PingReq) Decode(buf []byte) error {
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
 		return err
 	} else if l != 0 {
-		return 0, fmt.Errorf("Remain length must be 0, got %d", l)
+		return fmt.Errorf("Remain length must be 0, got %d", l)
 	} else {
 		msg.remainLength = l
 		offset += n

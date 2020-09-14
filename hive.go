@@ -53,61 +53,92 @@ func (h *Hive) Serve(ln net.Listener) {
 
 func (h *Hive) Receive(conn net.Conn) {
 	//TODO 先解析第一个包，而且必须是Connect
+	bee := NewBee(conn, h)
 
+	bufSize := 6
+	buf := make([]byte, bufSize)
+	of := 0
+	for {
+		n, err := conn.Read(buf[of:])
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		ln := of + n
 
+		//TODO 解析包头，包体
+		if ln < 2 {
+			//TODO error
+			return
+		}
 
+		//读取Remain Length
+		rl, rll := binary.Uvarint(buf[1:])
+		remainLength := int(rl)
+		packLen := remainLength + rll + 1
 
-	b := NewBee(conn, h)
-	go b.receiver()
-}
+		//读取未读完的包体
+		if packLen > bufSize {
+			buf = ReAlloc(buf, packLen)
 
-func (h*Hive) receive(conn net.Conn) {
-	buf := make([]byte, 6)
-	n, err := conn.Read(buf)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	//TODO 解析包头，包体
-	if n < 2 {
-		//TODO error
-		return
-	}
-
-	//读取Remain Length
-	rl, rll := binary.Uvarint(buf[1:])
-	remainLength := int(rl)
-	packLen := remainLength + rll + 1
-	if packLen > 6 {
-		buf = ReAlloc(buf, packLen)
-
-		//直至将全部包体读完
-		offset := n
-		for offset< packLen {
-			n, err = conn.Read(buf[offset:])
-			if err != nil {
-				log.Println(err)
-				return
+			//直至将全部包体读完
+			o := n
+			for o < packLen {
+				n, err = conn.Read(buf[o:])
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				o += n
 			}
-			offset += n
+		}
+
+		//解析消息
+		msg, err := packet.Decode(buf[:packLen])
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		//TODO 处理消息
+		h.handle(msg, bee)
+
+		//TODO 剩余内容
+		if packLen < bufSize {
+			buf = ReAlloc(buf[packLen:], packLen -bufSize)
+		} else {
+			buf = make([]byte, bufSize)
 		}
 	}
+}
 
-	msg, err := packet.Decode(buf[:packLen])
-	if err != nil {
-		log.Println(err)
-		return
+
+func (h *Hive) handle(msg packet.Message, bee *Bee) {
+	switch msg.Type() {
+	case packet.CONNECT:
+		h.handleConnect(msg.(*packet.Connect), bee)
+	case packet.PUBLISH:
+		h.handlePublish(msg.(*packet.Publish), bee)
+	case packet.PUBACK:
+		bee.pub1.Delete(msg.(*packet.PubAck).PacketId())
+	case packet.PUBREC:
+		msg.SetType(packet.PUBREL)
+		bee.dispatch(msg)
+	case packet.PUBREL:
+		msg.SetType(packet.PUBCOMP)
+		bee.dispatch(msg)
+	case packet.PUBCOMP:
+		bee.pub2.Delete(msg.(*packet.PubComp).PacketId())
+	case packet.SUBSCRIBE:
+		h.handleSubscribe(msg.(*packet.Subscribe), bee)
+	case packet.UNSUBSCRIBE:
+		h.handleUnSubscribe(msg.(*packet.UnSubscribe), bee)
+	case packet.PINGREQ:
+		msg.SetType(packet.PINGRESP)
+		bee.dispatch(msg)
+	case packet.DISCONNECT:
+		h.handleDisconnect(msg.(*packet.DisConnect), bee)
 	}
-
-	//TODO 处理消息
-	h.handle(msg)
-
-	//TODO 剩余内容
-	if packLen < 6 {
-		b := make([]byte, )
-	}
-
-
 }
 
 func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
@@ -161,12 +192,31 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 	}
 
 	//ack.SetCode(packet.CONNACK_ACCEPTED)
-	bee.dispatchMessage(ack)
+	bee.dispatch(ack)
 
 	//TODO 如果发生错误，与客户端断开连接
 }
 
 func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
+	qos := msg.Qos()
+	if qos == packet.Qos0 {
+
+	} else if qos == packet.Qos1 {
+		//Reply PUBACK
+		ack := packet.PUBACK.NewMessage().(*packet.PubAck)
+		ack.SetPacketId(msg.PacketId())
+		bee.dispatch(ack)
+	} else if qos == packet.Qos2 {
+		//Save & Send PUBREC
+		bee.recvPub2.Store(msg.PacketId(), msg)
+		ack := packet.PUBREC.NewMessage().(*packet.PubRec)
+		ack.SetPacketId(msg.PacketId())
+		bee.dispatch(ack)
+	} else {
+		//TODO error
+	}
+
+
 	if err := ValidTopic(msg.Topic()); err != nil {
 		//TODO log
 		log.Print("Topic invalid ", err)
@@ -199,7 +249,7 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 			if msg.Qos() > qos {
 				pub.SetQos(qos)
 			}
-			bb.dispatchMessage(&pub)
+			bb.dispatch(&pub)
 		}
 	}
 }
@@ -224,11 +274,11 @@ func (h *Hive) handleSubscribe(msg *packet.Subscribe, bee *Bee) {
 				if msg.Qos() > st.Qos() {
 					p.SetQos(st.Qos())
 				}
-				bee.dispatchMessage(&p)
+				bee.dispatch(&p)
 			})
 		}
 	}
-	bee.dispatchMessage(ack)
+	bee.dispatch(ack)
 }
 
 func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
@@ -241,7 +291,7 @@ func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
 			h.subTree.UnSubscribe(t, bee.clientId)
 		}
 	}
-	bee.dispatchMessage(ack)
+	bee.dispatch(ack)
 }
 
 func (h *Hive) handleDisconnect(msg *packet.DisConnect, bee *Bee) {

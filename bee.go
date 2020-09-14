@@ -1,7 +1,6 @@
 package beeq
 
 import (
-	"encoding/binary"
 	"git.zgwit.com/iot/beeq/packet"
 	"log"
 	"net"
@@ -33,6 +32,9 @@ type Bee struct {
 
 	hive *Hive
 
+	//消息发送队列，避免主协程任务过重
+	msgQueue chan packet.Message
+
 	timeout time.Duration
 }
 
@@ -44,104 +46,78 @@ func NewBee(conn net.Conn, hive *Hive) *Bee {
 	}
 }
 
-func (b *Bee) receiver() {
-	//Abort error
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		log.Print("b receiver panic ", r)
-	//	}
-	//}()
-
-	readHead := true
-	buf := Alloc(6)
-	offset := 0
-	total := 0
-	for {
-
-		err := b.conn.SetReadDeadline(time.Now().Add(b.timeout))
-		if err != nil {
-			//return 0, err
-			break
-		}
-		if l, err := b.conn.Read(buf[offset:]); err != nil {
-			log.Print("Receive Failed: ", err)
-			//net.ErroTim
-			break
-		} else {
-			offset += l
-		}
-
-		//Parse header
-		if readHead && offset >= 2 {
-			for i := 1; i <= offset; i++ {
-				if buf[i] < 0x80 {
-					rl, rll := binary.Uvarint(buf[1:])
-					//binary.MaxVarintLen32
-					//binary.PutUvarint()
-					remainLength := int(rl)
-					total = remainLength + rll + 1
-					if total > 6 {
-						buf = ReAlloc(buf, total)
-					}
-					readHead = false
-					break
-				}
-			}
-		}
-
-		//Parse Message
-		if !readHead && offset >= total {
-			readHead = true
-			bb := Alloc(6)
-			if msg, l, err := packet.Decode(buf); err != nil {
-				//TODO log err
-				log.Println("", err)
-				offset = 0 //clear data
-			} else {
-				//处理消息
-				b.handleMessage(msg)
-
-				//Only message less than 6 bytes
-				if offset > l {
-					copy(bb, bb[l:])
-					offset -= l
-				} else {
-					offset = 0 //clear data
-				}
-			}
-			buf = bb
-		}
-	}
-
-	b.conn = nil
-}
-
-func (b *Bee) handleMessage(msg packet.Message) {
-	log.Printf("Received message from %s: %s QOS(%d) DUP(%t) RETAIN(%t)", b.clientId, msg.Type().Name(), msg.Qos(), msg.Dup(), msg.Retain())
-	//log.Print("recv Message:", msg.Type().Name())
-	switch msg.Type() {
-	case packet.CONNECT:
-		b.handleConnect(msg.(*packet.Connect))
-	case packet.PUBLISH:
-		b.handlePublish(msg.(*packet.Publish))
-	case packet.PUBACK:
-		b.handlePubAck(msg.(*packet.PubAck))
-	case packet.PUBREC:
-		b.handlePubRec(msg.(*packet.PubRec))
-	case packet.PUBREL:
-		b.handlePubRel(msg.(*packet.PubRel))
-	case packet.PUBCOMP:
-		b.handlePubComp(msg.(*packet.PubComp))
-	case packet.SUBSCRIBE:
-		b.handleSubscribe(msg.(*packet.Subscribe))
-	case packet.UNSUBSCRIBE:
-		b.handleUnSubscribe(msg.(*packet.UnSubscribe))
-	case packet.PINGREQ:
-		b.handlePingReq(msg.(*packet.PingReq))
-	case packet.DISCONNECT:
-		b.handleDisconnect(msg.(*packet.DisConnect))
-	}
-}
+//
+//func (b *Bee) receiver() {
+//	//Abort error
+//	//defer func() {
+//	//	if r := recover(); r != nil {
+//	//		log.Print("b receiver panic ", r)
+//	//	}
+//	//}()
+//
+//	readHead := true
+//	buf := Alloc(6)
+//	offset := 0
+//	total := 0
+//	for {
+//
+//		err := b.conn.SetReadDeadline(time.Now().Add(b.timeout))
+//		if err != nil {
+//			//return 0, err
+//			break
+//		}
+//		if l, err := b.conn.Read(buf[offset:]); err != nil {
+//			log.Print("Receive Failed: ", err)
+//			//net.ErroTim
+//			break
+//		} else {
+//			offset += l
+//		}
+//
+//		//Parse header
+//		if readHead && offset >= 2 {
+//			for i := 1; i <= offset; i++ {
+//				if buf[i] < 0x80 {
+//					rl, rll := binary.Uvarint(buf[1:])
+//					//binary.MaxVarintLen32
+//					//binary.PutUvarint()
+//					remainLength := int(rl)
+//					total = remainLength + rll + 1
+//					if total > 6 {
+//						buf = ReAlloc(buf, total)
+//					}
+//					readHead = false
+//					break
+//				}
+//			}
+//		}
+//
+//		//Parse Message
+//		if !readHead && offset >= total {
+//			readHead = true
+//			bb := Alloc(6)
+//			if msg, l, err := packet.Decode(buf); err != nil {
+//				//TODO log err
+//				log.Println("", err)
+//				offset = 0 //clear data
+//			} else {
+//				//处理消息
+//				b.handleMessage(msg)
+//
+//				//Only message less than 6 bytes
+//				if offset > l {
+//					copy(bb, bb[l:])
+//					offset -= l
+//				} else {
+//					offset = 0 //clear data
+//				}
+//			}
+//			buf = bb
+//		}
+//	}
+//
+//	b.conn = nil
+//}
 
 func (b *Bee) handleConnect(msg *packet.Connect) {
 	b.clientId = string(msg.ClientId())
@@ -161,58 +137,19 @@ func (b *Bee) handlePublish(msg *packet.Publish) {
 		//Reply PUBACK
 		ack := packet.PUBACK.NewMessage().(*packet.PubAck)
 		ack.SetPacketId(msg.PacketId())
-		b.dispatchMessage(ack)
+		b.dispatch(ack)
 	} else if qos == packet.Qos2 {
 		//Save & Send PUBREC
 		b.recvPub2.Store(msg.PacketId(), msg)
 		ack := packet.PUBREC.NewMessage().(*packet.PubRec)
 		ack.SetPacketId(msg.PacketId())
-		b.dispatchMessage(ack)
+		b.dispatch(ack)
 	} else {
 		//error
 	}
 }
 
-func (b *Bee) handlePubAck(msg *packet.PubAck) {
-	//if _, ok := b.pub1.Load(msg.PacketId()); ok {
-	b.pub1.Delete(msg.PacketId())
-	//}
-}
-
-func (b *Bee) handlePubRec(msg *packet.PubRec) {
-	msg.SetType(packet.PUBREL)
-	b.dispatchMessage(msg)
-}
-
-func (b *Bee) handlePubRel(msg *packet.PubRel) {
-	msg.SetType(packet.PUBCOMP)
-	b.dispatchMessage(msg)
-}
-
-func (b *Bee) handlePubComp(msg *packet.PubComp) {
-	//if _, ok := b.pub2.Load(msg.PacketId()); ok {
-	b.pub2.Delete(msg.PacketId())
-	//}
-}
-
-func (b *Bee) handleSubscribe(msg *packet.Subscribe) {
-	b.hive.handleSubscribe(msg, b)
-}
-
-func (b *Bee) handleUnSubscribe(msg *packet.UnSubscribe) {
-	b.hive.handleUnSubscribe(msg, b)
-}
-
-func (b *Bee) handlePingReq(msg *packet.PingReq) {
-	msg.SetType(packet.PINGRESP)
-	b.dispatchMessage(msg)
-}
-
-func (b *Bee) handleDisconnect(msg *packet.DisConnect) {
-	b.hive.handleDisconnect(msg, b)
-}
-
-func (b *Bee) dispatchMessage(msg packet.Message) {
+func (b *Bee) send(msg packet.Message) {
 	//log.Printf("Send message to %s: %s QOS(%d) DUP(%t) RETAIN(%t)", b.clientId, msg.Type().Name(), msg.Qos(), msg.Dup(), msg.Retain())
 	if head, payload, err := msg.Encode(); err != nil {
 		//TODO log
@@ -241,5 +178,23 @@ func (b *Bee) dispatchMessage(msg packet.Message) {
 		} else if msg.Qos() == packet.Qos2 {
 			b.pub2.Store(pub.PacketId(), pub)
 		}
+	}
+}
+
+func (b *Bee) dispatch(msg packet.Message) {
+	if b.msgQueue != nil {
+		b.msgQueue <- msg
+		return
+	}
+
+	b.send(msg)
+}
+
+
+func (b *Bee) sender()  {
+	for b.conn != nil {
+		//TODO select or close
+		msg := <- b.msgQueue
+		b.send(msg)
 	}
 }
