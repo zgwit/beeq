@@ -44,23 +44,6 @@ func NewBee(conn net.Conn, hive *Hive) *Bee {
 	}
 }
 
-
-func (b *Bee) recv(buf []byte) (int, error) {
-	err := b.conn.SetReadDeadline(time.Now().Add(b.timeout))
-	if err != nil {
-		return 0, err
-	}
-	return b.conn.Read(buf)
-}
-
-func (b *Bee) send(buf []byte) (int, error) {
-	err := b.conn.SetWriteDeadline(time.Now().Add(b.timeout))
-	if err != nil {
-		return 0, err
-	}
-	return b.conn.Write(buf)
-}
-
 func (b *Bee) receiver() {
 	//Abort error
 	//defer func() {
@@ -69,14 +52,20 @@ func (b *Bee) receiver() {
 	//	}
 	//}()
 
-
 	readHead := true
 	buf := Alloc(6)
 	offset := 0
 	total := 0
 	for {
+
+		err := b.conn.SetReadDeadline(time.Now().Add(b.timeout))
+		if err != nil {
+			//return 0, err
+			break
+		}
 		if l, err := b.conn.Read(buf[offset:]); err != nil {
 			log.Print("Receive Failed: ", err)
+			//net.ErroTim
 			break
 		} else {
 			offset += l
@@ -183,9 +172,9 @@ func (b *Bee) handlePublish(msg *packet.Publish) {
 }
 
 func (b *Bee) handlePubAck(msg *packet.PubAck) {
-	if _, ok := b.pub1.Load(msg.PacketId()); ok {
-		b.pub1.Delete(msg.PacketId())
-	}
+	//if _, ok := b.pub1.Load(msg.PacketId()); ok {
+	b.pub1.Delete(msg.PacketId())
+	//}
 }
 
 func (b *Bee) handlePubRec(msg *packet.PubRec) {
@@ -199,9 +188,9 @@ func (b *Bee) handlePubRel(msg *packet.PubRel) {
 }
 
 func (b *Bee) handlePubComp(msg *packet.PubComp) {
-	if _, ok := b.pub2.Load(msg.PacketId()); ok {
-		b.pub2.Delete(msg.PacketId())
-	}
+	//if _, ok := b.pub2.Load(msg.PacketId()); ok {
+	b.pub2.Delete(msg.PacketId())
+	//}
 }
 
 func (b *Bee) handleSubscribe(msg *packet.Subscribe) {
@@ -222,14 +211,23 @@ func (b *Bee) handleDisconnect(msg *packet.DisConnect) {
 }
 
 func (b *Bee) dispatchMessage(msg packet.Message) {
-	log.Printf("Send message to %s: %s QOS(%d) DUP(%t) RETAIN(%t)", b.clientId, msg.Type().Name(), msg.Qos(), msg.Dup(), msg.Retain())
+	//log.Printf("Send message to %s: %s QOS(%d) DUP(%t) RETAIN(%t)", b.clientId, msg.Type().Name(), msg.Qos(), msg.Dup(), msg.Retain())
 	if head, payload, err := msg.Encode(); err != nil {
 		//TODO log
 		log.Print("Message encode  error: ", err)
 	} else {
-		b.send(head)
+		//err := b.conn.SetWriteDeadline(time.Now().Add(b.timeout))
+		_, err = b.conn.Write(head)
+		if err != nil {
+			//TODO 关闭bee
+			//return err
+		}
 		if payload != nil && len(payload) > 0 {
-			b.send(payload)
+			_, err = b.conn.Write(payload)
+			if err != nil {
+				//TODO 关闭bee
+				//return err
+			}
 		}
 	}
 

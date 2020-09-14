@@ -51,6 +51,9 @@ func (h *Hive) Serve(ln net.Listener) {
 }
 
 func (h *Hive) Receive(conn net.Conn) {
+	//TODO 先解析第一个包，而且必须是Connect
+
+
 	b := NewBee(conn, h)
 	go b.receiver()
 }
@@ -70,12 +73,9 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 		}
 
 		// Generate unique clientId (uuid random)
-		for {
-			clientId = uuid.New().String()
-			if _, ok := h.bees.Load(clientId); !ok {
-				break
-			}
-		}
+		clientId = uuid.New().String()
+		//UUID不用验重了
+		//for { if _, ok := h.bees.Load(clientId); !ok { break } }
 	} else {
 		clientId = string(msg.ClientId())
 
