@@ -8,7 +8,7 @@ type DisConnect struct {
 	Header
 }
 
-func (msg *DisConnect) Decode(buf []byte) (int, error) {
+func (msg *DisConnect) Decode(buf []byte) error {
 	msg.dirty = false
 
 	//Tips. remain length is fixed 0 & total is fixed 2
@@ -25,7 +25,7 @@ func (msg *DisConnect) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else if l != 0 {
 		return 0, fmt.Errorf("Remain length must be 0, got %d", l)
 	} else {
@@ -36,7 +36,7 @@ func (msg *DisConnect) Decode(buf []byte) (int, error) {
 	// FixHead & VarHead
 	msg.head = buf[0:offset]
 
-	return offset, nil
+	return nil
 }
 
 func (msg *DisConnect) Encode() ([]byte, []byte, error) {

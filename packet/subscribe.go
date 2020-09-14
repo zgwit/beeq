@@ -61,7 +61,7 @@ func (msg *Subscribe) ClearTopic() {
 	msg.topics = msg.topics[0:0]
 }
 
-func (msg *Subscribe) Decode(buf []byte) (int, error) {
+func (msg *Subscribe) Decode(buf []byte) error {
 	msg.dirty = false
 
 	//total := len(buf)
@@ -73,7 +73,7 @@ func (msg *Subscribe) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else {
 		msg.remainLength = l
 		offset += n
@@ -92,16 +92,16 @@ func (msg *Subscribe) Decode(buf []byte) (int, error) {
 	for offset-headerLen < msg.remainLength {
 		st := &SubTopic{}
 		//Topic
-		if b, n, err := ReadBytes(buf[offset:]); err != nil {
-			return offset, err
+		if b, err := ReadBytes(buf[offset:]); err != nil {
+			return err
 		} else {
 			st.SetTopic(b)
-			offset += n
+			offset += len(b) + 2
 		}
 		//Qos
 		qos := buf[offset]
 		if (qos & 0x03) != qos {
-			return offset, fmt.Errorf("Topic Qos %x", qos)
+			return fmt.Errorf("Topic Qos %x", qos)
 		}
 		st.SetQos(MsgQos(qos))
 		offset++
@@ -111,7 +111,7 @@ func (msg *Subscribe) Decode(buf []byte) (int, error) {
 	//Payload
 	msg.payload = buf[plo:offset]
 
-	return offset, nil
+	return nil
 }
 
 func (msg *Subscribe) Encode() ([]byte, []byte, error) {
@@ -160,10 +160,10 @@ func (msg *Subscribe) Encode() ([]byte, []byte, error) {
 	//Topics
 	for _, t := range msg.topics {
 		//Topic
-		if n, err := WriteBytes(msg.payload[plo:], t.topic); err != nil {
+		if err := WriteBytes(msg.payload[plo:], t.topic); err != nil {
 			return msg.head, nil, err
 		} else {
-			plo += n
+			plo += len(t.topic) + 2
 		}
 		//Qos
 		msg.payload[plo] = t.flag

@@ -1,6 +1,7 @@
 package beeq
 
 import (
+	"encoding/binary"
 	uuid "github.com/google/uuid"
 	"git.zgwit.com/iot/beeq/packet"
 	"log"
@@ -54,8 +55,59 @@ func (h *Hive) Receive(conn net.Conn) {
 	//TODO 先解析第一个包，而且必须是Connect
 
 
+
+
 	b := NewBee(conn, h)
 	go b.receiver()
+}
+
+func (h*Hive) receive(conn net.Conn) {
+	buf := make([]byte, 6)
+	n, err := conn.Read(buf)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	//TODO 解析包头，包体
+	if n < 2 {
+		//TODO error
+		return
+	}
+
+	//读取Remain Length
+	rl, rll := binary.Uvarint(buf[1:])
+	remainLength := int(rl)
+	packLen := remainLength + rll + 1
+	if packLen > 6 {
+		buf = ReAlloc(buf, packLen)
+
+		//直至将全部包体读完
+		offset := n
+		for offset< packLen {
+			n, err = conn.Read(buf[offset:])
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			offset += n
+		}
+	}
+
+	msg, err := packet.Decode(buf[:packLen])
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	//TODO 处理消息
+	h.handle(msg)
+
+	//TODO 剩余内容
+	if packLen < 6 {
+		b := make([]byte, )
+	}
+
+
 }
 
 func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {

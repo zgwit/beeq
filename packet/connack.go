@@ -44,13 +44,13 @@ func (msg *Connack) SetCode(c ConnackCode) {
 	msg.code = byte(c)
 }
 
-func (msg *Connack) Decode(buf []byte) (int, error) {
+func (msg *Connack) Decode(buf []byte) error {
 	msg.dirty = false
 
 	//Tips. remain length is fixed 2 & total is fixed 4
 	total := len(buf)
 	if total < 4 {
-		return 0, fmt.Errorf("Connack expect fixed 4 bytes (%d)", total)
+		return fmt.Errorf("Connack expect fixed 4 bytes (%d)", total)
 	}
 
 	offset := 0
@@ -61,9 +61,9 @@ func (msg *Connack) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else if l != 2 {
-		return 0, fmt.Errorf("Remain length must be 2, got %d", l)
+		return fmt.Errorf("Remain length must be 2, got %d", l)
 	} else {
 		msg.remainLength = l
 		offset += n
@@ -80,7 +80,7 @@ func (msg *Connack) Decode(buf []byte) (int, error) {
 	// FixHead & VarHead
 	msg.head = buf[0:offset]
 
-	return offset, nil
+	return nil
 }
 
 func (msg *Connack) Encode() ([]byte, []byte, error) {

@@ -20,7 +20,7 @@ func (msg *PubAck) SetPacketId(p uint16) {
 	msg.packetId = p
 }
 
-func (msg *PubAck) Decode(buf []byte) (int, error) {
+func (msg *PubAck) Decode(buf []byte) error {
 	msg.dirty = false
 
 	//Tips. remain length is fixed 2 & total is fixed 4
@@ -37,7 +37,7 @@ func (msg *PubAck) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else if l != 2 {
 		return 0, fmt.Errorf("Remain length must be 2, got %d", l)
 	} else {
@@ -52,7 +52,7 @@ func (msg *PubAck) Decode(buf []byte) (int, error) {
 	// FixHead & VarHead
 	msg.head = buf[0:offset]
 
-	return offset, nil
+	return nil
 }
 
 func (msg *PubAck) Encode() ([]byte, []byte, error) {

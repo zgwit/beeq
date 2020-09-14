@@ -76,6 +76,8 @@ func (b *Bee) receiver() {
 			for i := 1; i <= offset; i++ {
 				if buf[i] < 0x80 {
 					rl, rll := binary.Uvarint(buf[1:])
+					//binary.MaxVarintLen32
+					//binary.PutUvarint()
 					remainLength := int(rl)
 					total = remainLength + rll + 1
 					if total > 6 {

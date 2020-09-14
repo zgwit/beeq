@@ -204,10 +204,11 @@ func (msg *Connect) ValidClientId() bool {
 	return clientIdRegex.Match(msg.clientId)
 }
 
-func (msg *Connect) Decode(buf []byte) (int, error) {
+func (msg *Connect) Decode(buf []byte) error {
 	msg.dirty = false
 
 	//total := len(buf)
+	//TODO 判断buf长度
 	offset := 0
 
 	//Header
@@ -216,26 +217,26 @@ func (msg *Connect) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else {
 		msg.remainLength = l
 		offset += n
 	}
 
 	//1 Protocol Name
-	if b, n, err := ReadBytes(buf[offset:]); err != nil {
-		return offset, err
+	if b, err := ReadBytes(buf[offset:]); err != nil {
+		return err
 	} else {
 		msg.protoName = b
-		offset += n
+		offset += len(b) + 2
 	}
 
 	//2 Protocol Level
 	msg.protoLevel = buf[offset]
 	if version, ok := SupportedVersions[msg.ProtoLevel()]; !ok {
-		return offset, fmt.Errorf("Protocol level (%d) is not support", msg.ProtoLevel())
+		return fmt.Errorf("Protocol level (%d) is not support", msg.ProtoLevel())
 	} else if ver := string(msg.ProtoName()); ver != version {
-		return offset, fmt.Errorf("Protocol name (%s) invalid", ver)
+		return fmt.Errorf("Protocol name (%s) invalid", ver)
 	}
 	offset++
 
@@ -244,19 +245,19 @@ func (msg *Connect) Decode(buf []byte) (int, error) {
 	offset++
 
 	if msg.flag&0x1 != 0 {
-		return offset, fmt.Errorf("Connect Flags (%x) reserved bit 0", msg.flag)
+		return fmt.Errorf("Connect Flags (%x) reserved bit 0", msg.flag)
 	}
 
 	if msg.WillQos() > Qos2 {
-		return offset, fmt.Errorf("Invalid WillQoS (%d)", msg.WillQos())
+		return fmt.Errorf("Invalid WillQoS (%d)", msg.WillQos())
 	}
 
 	if !msg.WillFlag() && (msg.WillRetain() || msg.WillQos() != Qos0) {
-		return offset, fmt.Errorf("Invalid WillFlag (%x)", msg.flag)
+		return fmt.Errorf("Invalid WillFlag (%x)", msg.flag)
 	}
 
 	if msg.UserNameFlag() != msg.PasswordFlag() {
-		return offset, fmt.Errorf("UserName Password must be both exists or not (%x)", msg.flag)
+		return fmt.Errorf("UserName Password must be both exists or not (%x)", msg.flag)
 	}
 
 	//4 Keep Alive
@@ -268,66 +269,67 @@ func (msg *Connect) Decode(buf []byte) (int, error) {
 	plo := offset
 
 	//5 ClientId
-	if b, n, err := ReadBytes(buf[offset:]); err != nil {
-		return offset, err
+	if b, err := ReadBytes(buf[offset:]); err != nil {
+		return err
 	} else {
 		msg.clientId = b
-		offset += n
+		ln := len(b)
+		offset += ln + 2
 
 		// None ClientId, Must Clean Session
-		if n == 2 && !msg.CleanSession() {
-			return offset, fmt.Errorf("None ClientId, Must Clean Session (%x)", msg.flag)
+		if ln == 2 && !msg.CleanSession() {
+			return fmt.Errorf("None ClientId, Must Clean Session (%x)", msg.flag)
 		}
 
 		// ClientId at most 23 characters
-		if n > 128+2 {
-			return offset, fmt.Errorf("Too long ClientId (%s)", string(msg.ClientId()))
+		if ln > 128+2 {
+			return fmt.Errorf("Too long ClientId (%s)", string(msg.ClientId()))
 		}
 
 		// ClientId 0-9, a-z, A-Z
-		if n > 0 && !msg.ValidClientId() {
-			return offset, fmt.Errorf("Invalid ClientId (%s)", string(msg.ClientId()))
+		if ln > 0 && !msg.ValidClientId() {
+			return fmt.Errorf("Invalid ClientId (%s)", string(msg.ClientId()))
 		}
 	}
 
 	//6 Will Topic & Message
 	if msg.WillFlag() {
-		if b, n, err := ReadBytes(buf[offset:]); err != nil {
-			return offset, err
+		if b, err := ReadBytes(buf[offset:]); err != nil {
+			return err
 		} else {
 			msg.willTopic = b
-			offset += n
+			offset += len(b) + 2
 		}
 
-		if b, n, err := ReadBytes(buf[offset:]); err != nil {
-			return offset, err
+		if b, err := ReadBytes(buf[offset:]); err != nil {
+			return err
 		} else {
 			msg.willMessage = b
-			offset += n
+			offset += len(b) + 2
 		}
 	}
 
 	//7 UserName & Password
 	if msg.UserNameFlag() {
-		if b, n, err := ReadBytes(buf[offset:]); err != nil {
-			return offset, err
+		if b, err := ReadBytes(buf[offset:]); err != nil {
+			return err
 		} else {
 			msg.userName = b
-			offset += n
+			offset += len(b) + 2
 		}
 
-		if b, n, err := ReadBytes(buf[offset:]); err != nil {
-			return offset, err
+		if b, err := ReadBytes(buf[offset:]); err != nil {
+			return err
 		} else {
 			msg.password = b
-			offset += n
+			offset += len(b) + 2
 		}
 	}
 
 	//Payload
 	msg.payload = buf[plo:offset]
 
-	return offset, nil
+	return nil
 }
 
 func (msg *Connect) Encode() ([]byte, []byte, error) {
@@ -382,10 +384,10 @@ func (msg *Connect) Encode() ([]byte, []byte, error) {
 	}
 
 	//1 Protocol Name
-	if n, err := WriteBytes(msg.head[ho:], msg.protoName); err != nil {
+	if err := WriteBytes(msg.head[ho:], msg.protoName); err != nil {
 		return nil, nil, err
 	} else {
-		ho += n
+		ho += len(msg.protoName) + 2
 	}
 
 	//2 Protocol Level
@@ -402,39 +404,39 @@ func (msg *Connect) Encode() ([]byte, []byte, error) {
 
 	plo := 0
 	//5 ClientId
-	if n, err := WriteBytes(msg.payload[plo:], msg.clientId); err != nil {
+	if err := WriteBytes(msg.payload[plo:], msg.clientId); err != nil {
 		return msg.head, nil, err
 	} else {
-		plo += n
+		plo += len(msg.clientId) + 2
 	}
 
 	//6 Will Topic & Message
 	if msg.WillFlag() {
-		if n, err := WriteBytes(msg.payload[plo:], msg.willTopic); err != nil {
+		if err := WriteBytes(msg.payload[plo:], msg.willTopic); err != nil {
 			return msg.head, nil, err
 		} else {
-			plo += n
+			plo += len(msg.willTopic) + 2
 		}
 
-		if n, err := WriteBytes(msg.payload[plo:], msg.willMessage); err != nil {
+		if err := WriteBytes(msg.payload[plo:], msg.willMessage); err != nil {
 			return msg.head, nil, err
 		} else {
-			plo += n
+			plo += len(msg.willMessage) + 2
 		}
 	}
 
 	//7 UserName & Password
 	if msg.UserNameFlag() {
-		if n, err := WriteBytes(msg.payload[plo:], msg.userName); err != nil {
+		if err := WriteBytes(msg.payload[plo:], msg.userName); err != nil {
 			return msg.head, nil, err
 		} else {
-			plo += n
+			plo += len(msg.userName) + 2
 		}
 
-		if n, err := WriteBytes(msg.payload[plo:], msg.password); err != nil {
+		if err := WriteBytes(msg.payload[plo:], msg.password); err != nil {
 			return msg.head, nil, err
 		} else {
-			plo += n
+			plo += len(msg.password) + 2
 		}
 	}
 

@@ -44,7 +44,7 @@ func (msg *SubAck) ClearCode() {
 	msg.codes = msg.codes[0:0]
 }
 
-func (msg *SubAck) Decode(buf []byte) (int, error) {
+func (msg *SubAck) Decode(buf []byte) error {
 	msg.dirty = false
 
 	//total := len(buf)
@@ -56,7 +56,7 @@ func (msg *SubAck) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else {
 		msg.remainLength = l
 		offset += n
@@ -78,7 +78,7 @@ func (msg *SubAck) Decode(buf []byte) (int, error) {
 	//Payload
 	msg.payload = msg.codes
 
-	return offset, nil
+	return nil
 }
 
 func (msg *SubAck) Encode() ([]byte, []byte, error) {

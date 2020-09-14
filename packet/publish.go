@@ -42,7 +42,7 @@ func (msg *Publish) SetPayload(p []byte) {
 	msg.payload = p
 }
 
-func (msg *Publish) Decode(buf []byte) (int, error) {
+func (msg *Publish) Decode(buf []byte) error {
 	msg.dirty = false
 
 	total := len(buf)
@@ -54,7 +54,7 @@ func (msg *Publish) Decode(buf []byte) (int, error) {
 
 	//Remain Length
 	if l, n, err := ReadRemainLength(buf[offset:]); err != nil {
-		return offset, err
+		return err
 	} else {
 		msg.remainLength = l
 		offset += n
@@ -66,11 +66,11 @@ func (msg *Publish) Decode(buf []byte) (int, error) {
 	}
 
 	//1 Topic
-	if b, n, err := ReadBytes(buf[offset:]); err != nil {
-		return offset, err
+	if b, err := ReadBytes(buf[offset:]); err != nil {
+		return err
 	} else {
 		msg.topic = b
-		offset += n
+		offset += len(b) + 2
 	}
 
 	//2 PacketId //Only Qos1 Qos2 has packet id
@@ -90,7 +90,7 @@ func (msg *Publish) Decode(buf []byte) (int, error) {
 
 	offset += len(b)
 
-	return offset, nil
+	return nil
 }
 
 func (msg *Publish) Encode() ([]byte, []byte, error) {
@@ -133,10 +133,10 @@ func (msg *Publish) Encode() ([]byte, []byte, error) {
 	}
 
 	//1 Topic
-	if n, err := WriteBytes(msg.head[ho:], msg.topic); err != nil {
+	if err := WriteBytes(msg.head[ho:], msg.topic); err != nil {
 		return nil, nil, err
 	} else {
-		ho += n
+		ho += len(msg.topic) + 2
 	}
 
 	//2 PacketId

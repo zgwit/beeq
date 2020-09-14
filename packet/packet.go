@@ -48,36 +48,36 @@ func WriteRemainLength(b []byte, rl int) (int, error) {
 	return binary.PutUvarint(b, uint64(rl)), nil
 }
 
-func ReadBytes(buf []byte) ([]byte, int, error) {
+func ReadBytes(buf []byte) ([]byte, error) {
 	if len(buf) < 2 {
-		return nil, 0, fmt.Errorf("[readLPBytes] Expect at least %d bytes for prefix", 2)
+		return nil, fmt.Errorf("[readLPBytes] Expect at least %d bytes for prefix", 2)
 	}
 	length := int(binary.BigEndian.Uint16(buf))
 	total := length + 2
 	if len(buf) < total {
-		return nil, 0, fmt.Errorf("[readLPBytes] Expect at least %d bytes", length+2)
+		return nil, fmt.Errorf("[readLPBytes] Expect at least %d bytes", length+2)
 	}
 	b := buf[2 : total]
-	return b, total, nil
+	return b, nil
 }
 
-func WriteBytes(buf []byte, b []byte) (int, error) {
+func WriteBytes(buf []byte, b []byte) error {
 	length, size := len(b), len(buf)
 
 	if length > 65535 {
-		return 0, fmt.Errorf("[writeLPBytes] Too much bytes(%d) to write", length)
+		return fmt.Errorf("[writeLPBytes] Too much bytes(%d) to write", length)
 	}
 
 	total := length + 2
 	if size < total {
-		return 0, fmt.Errorf("[writeLPBytes] Expect at least %d bytes", total)
+		return fmt.Errorf("[writeLPBytes] Expect at least %d bytes", total)
 	}
 
 	binary.BigEndian.PutUint16(buf, uint16(length))
 
 	copy(buf[2:], b)
 
-	return total, nil
+	return nil
 }
 
 func BytesDup(buf []byte) []byte {
@@ -86,14 +86,14 @@ func BytesDup(buf []byte) []byte {
 	return b
 }
 
-func Decode(buf []byte) (Message, int, error) {
+func Decode(buf []byte) (Message, error) {
 	mt := MsgType(buf[0] >> 4)
 	msg := mt.NewMessage()
 	if msg != nil {
-		l, err := msg.Decode(buf)
-		return msg, l, err
+		err := msg.Decode(buf)
+		return msg, err
 	} else {
-		return nil, 0, fmt.Errorf("unknown messege type %d", mt)
+		return nil, fmt.Errorf("unknown messege type %d", mt)
 	}
 }
 

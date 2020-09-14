@@ -106,7 +106,6 @@ type Message interface {
 	SetRetain(b bool)
 	RemainLength() int
 
-	Decode([]byte) (int, error)
-
+	Decode([]byte) error
 	Encode() ([]byte, []byte, error)
 }
