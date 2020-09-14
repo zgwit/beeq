@@ -53,7 +53,7 @@ func (h *Hive) Serve(ln net.Listener) {
 
 func (h *Hive) Receive(conn net.Conn) {
 	//TODO 先解析第一个包，而且必须是Connect
-	bee := NewBee(conn, h)
+	bee := NewBee(conn)
 
 	bufSize := 6
 	buf := make([]byte, bufSize)
@@ -100,12 +100,15 @@ func (h *Hive) Receive(conn net.Conn) {
 			return
 		}
 
-		//TODO 处理消息
+		//处理消息
+		//TODO 可以放入队列
 		h.handle(msg, bee)
 
-		//TODO 剩余内容
+		//解析 剩余内容
 		if packLen < bufSize {
-			buf = ReAlloc(buf[packLen:], packLen -bufSize)
+			buf = ReAlloc(buf[packLen:], bufSize - packLen)
+			of = bufSize - packLen
+			//TODO 剩余内容可能已经包含了消息，不用再Read，直接解析
 		} else {
 			buf = make([]byte, bufSize)
 		}
