@@ -18,9 +18,8 @@ func (p *Parser) Parse(buf []byte) []Message {
 		p.buf = nil
 	} else {
 		//复制内存，避免覆盖
-		b := make([]byte, len(buf))
+		b = make([]byte, len(buf))
 		copy(b, buf)
-
 	}
 
 	//解析
