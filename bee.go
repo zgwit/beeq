@@ -61,23 +61,22 @@ func (b *Bee) Close() error {
 	return err
 }
 
-func (b *Bee) send(msg packet.Message) {
+func (b *Bee) send(msg packet.Message) error{
 	//log.Printf("Send message to %s: %s QOS(%d) DUP(%t) RETAIN(%t)", b.clientId, msg.Type().Name(), msg.Qos(), msg.Dup(), msg.Retain())
 	if head, payload, err := msg.Encode(); err != nil {
-		//TODO log
-		log.Print("Message encode  error: ", err)
+		return err
 	} else {
 		//err := b.conn.SetWriteDeadline(time.Now().Add(b.timeout))
 		_, err = b.conn.Write(head)
 		if err != nil {
-			//TODO 关闭bee
-			//return err
+			// 关闭bee
+			return err
 		}
 		if payload != nil && len(payload) > 0 {
 			_, err = b.conn.Write(payload)
 			if err != nil {
-				//TODO 关闭bee
-				//return err
+				// 关闭bee
+				return err
 			}
 		}
 	}
@@ -91,6 +90,8 @@ func (b *Bee) send(msg packet.Message) {
 			b.pub2.Store(pub.PacketId(), pub)
 		}
 	}
+
+	return nil
 }
 
 func (b *Bee) dispatch(msg packet.Message) {
@@ -99,7 +100,11 @@ func (b *Bee) dispatch(msg packet.Message) {
 		return
 	}
 
-	b.send(msg)
+	err := b.send(msg)
+	if err != nil {
+		log.Println(err)
+		//TODO 关闭
+	}
 }
 
 

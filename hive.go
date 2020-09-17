@@ -260,7 +260,7 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 
 	if err := ValidTopic(msg.Topic()); err != nil {
 		//TODO log
-		log.Print("Topic invalid ", err)
+		log.Println("Topic invalid ", err)
 		return
 	}
 
@@ -280,7 +280,7 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 	for clientId, qos := range subs {
 		if b, ok := h.bees.Load(clientId); ok {
 			bb := b.(*Bee)
-			if bb.conn == nil {
+			if bb.closed {
 				continue
 			}
 
@@ -310,7 +310,7 @@ func (h *Hive) handleSubscribe(msg *packet.Subscribe, bee *Bee) {
 	}
 
 	for _, st := range msg.Topics() {
-		log.Print("Subscribe ", string(st.Topic()))
+		//log.Print("Subscribe ", string(st.Topic()))
 		if err := ValidSubscribe(st.Topic()); err != nil {
 			log.Println("Invalid topic ", err)
 			//log error
@@ -341,9 +341,10 @@ func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
 
 	ack := packet.UNSUBACK.NewMessage().(*packet.UnSubAck)
 	for _, t := range msg.Topics() {
-		log.Print("UnSubscribe ", string(t))
+		//log.Print("UnSubscribe ", string(t))
 		if err := ValidSubscribe(t); err != nil {
 			//TODO log
+			log.Println(err)
 		} else {
 			h.subTree.UnSubscribe(t, bee.clientId)
 		}
