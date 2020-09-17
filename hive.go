@@ -76,11 +76,12 @@ func (h *Hive) Receive(conn net.Conn) {
 		}
 		ln := of + n
 
-		//TODO 解析包头，包体
 		if ln < 2 {
-			//TODO error
-			return
+			of = ln
+			continue
 		}
+
+		//解析包头，包体
 
 		//读取Remain Length
 		rl, rll := binary.Uvarint(buf[1:])
@@ -92,7 +93,7 @@ func (h *Hive) Receive(conn net.Conn) {
 			buf = reAlloc(buf, packLen)
 
 			//直至将全部包体读完
-			o := n
+			o := ln
 			for o < packLen {
 				n, err = conn.Read(buf[o:])
 				if err != nil {
