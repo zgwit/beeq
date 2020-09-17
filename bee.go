@@ -34,6 +34,8 @@ type Bee struct {
 	msgQueue chan packet.Message
 
 	timeout time.Duration
+
+	closed bool
 }
 
 func NewBee(conn net.Conn) *Bee {
@@ -41,6 +43,17 @@ func NewBee(conn net.Conn) *Bee {
 		conn: conn,
 		//timeout: time.Hour * 24,
 	}
+}
+
+func (b *Bee) Disconnect() error {
+	b.send(&packet.DisConnect{})
+	return b.Close()
+}
+
+func (b *Bee) Close() error {
+	err := b.conn.Close()
+	b.closed = true
+	return err
 }
 
 func (b *Bee) send(msg packet.Message) {

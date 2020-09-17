@@ -72,7 +72,7 @@ func (h *Hive) Receive(conn net.Conn) {
 		n, err := conn.Read(buf[of:])
 		if err != nil {
 			log.Println(err)
-			return
+			break
 		}
 		ln := of + n
 
@@ -98,9 +98,14 @@ func (h *Hive) Receive(conn net.Conn) {
 				n, err = conn.Read(buf[o:])
 				if err != nil {
 					log.Println(err)
-					return
+					//return
+					break
 				}
 				o += n
+			}
+			//一般不会发生
+			if o < packLen {
+				break
 			}
 		}
 
@@ -108,7 +113,7 @@ func (h *Hive) Receive(conn net.Conn) {
 		msg, err := packet.Decode(buf[:packLen])
 		if err != nil {
 			log.Println(err)
-			return
+			break
 		}
 
 		//处理消息
@@ -124,6 +129,8 @@ func (h *Hive) Receive(conn net.Conn) {
 			buf = make([]byte, bufSize)
 		}
 	}
+
+	_ = bee.Close()
 }
 
 func (h *Hive) handle(msg packet.Message, bee *Bee) {
@@ -162,7 +169,8 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 		if !h.onConnect(msg, bee) {
 			ack.SetCode(packet.CONNACK_INVALID_USERNAME_PASSWORD)
 			bee.dispatch(ack)
-			//TODO 断开
+			// 断开
+			_ = bee.Close()
 			return
 		}
 	}
@@ -173,6 +181,8 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 		if !msg.CleanSession() {
 			//TODO 无ID，必须是清空会话 error
 			//return
+			_ = bee.Close()
+			return
 		}
 
 		// Generate unique clientId (uuid random)
@@ -185,11 +195,11 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 		if v, ok := h.bees.Load(clientId); ok {
 			b := v.(*Bee)
 			// ClientId is already used
-			if b.conn != nil {
+			if !b.closed {
 				//error reject
 				ack.SetCode(packet.CONNACK_UNAVAILABLE)
 				bee.dispatch(ack)
-				//TODO 判断
+				_ = bee.Close()
 				return
 			} else {
 				if !msg.CleanSession() {
@@ -213,10 +223,9 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 		bee.timeout = time.Second * time.Duration(msg.KeepAlive()) * 3 / 2
 	}
 
-	//ack.SetCode(packet.CONNACK_ACCEPTED)
-	bee.dispatch(ack)
-
 	//TODO 如果发生错误，与客户端断开连接
+	ack.SetCode(packet.CONNACK_ACCEPTED)
+	bee.dispatch(ack)
 }
 
 func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
@@ -229,7 +238,7 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 
 	qos := msg.Qos()
 	if qos == packet.Qos0 {
-
+		//不需要回复puback
 	} else if qos == packet.Qos1 {
 		//Reply PUBACK
 		ack := packet.PUBACK.NewMessage().(*packet.PubAck)
@@ -243,6 +252,7 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 		bee.dispatch(ack)
 	} else {
 		//TODO error
+
 	}
 
 	if err := ValidTopic(msg.Topic()); err != nil {
@@ -344,7 +354,7 @@ func (h *Hive) handleDisconnect(msg *packet.DisConnect, bee *Bee) {
 	}
 
 	h.bees.Delete(bee.clientId)
-	_ = bee.conn.Close()
+	_ = bee.Close()
 }
 
 func (h *Hive) OnConnect(fn func(*packet.Connect, *Bee) bool) {
