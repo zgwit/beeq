@@ -35,6 +35,7 @@ type Bee struct {
 
 	timeout time.Duration
 
+	//关闭标记
 	closed bool
 }
 
@@ -43,6 +44,10 @@ func NewBee(conn net.Conn) *Bee {
 		conn: conn,
 		//timeout: time.Hour * 24,
 	}
+}
+
+func (b* Bee) ClientId() string  {
+	return b.clientId
 }
 
 func (b *Bee) Disconnect() error {

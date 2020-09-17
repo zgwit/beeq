@@ -211,6 +211,8 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 					bee.pub2 = b.pub2
 					bee.recvPub2 = b.recvPub2
 					bee.packetId = b.packetId
+
+					//ack.SetSessionPresent(true)
 				}
 			}
 		}
