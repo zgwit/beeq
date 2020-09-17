@@ -127,6 +127,7 @@ func (h *Hive) Receive(conn net.Conn) {
 			//TODO 剩余内容可能已经包含了消息，不用再Read，直接解析
 		} else {
 			buf = make([]byte, bufSize)
+			of = 0
 		}
 	}
 
