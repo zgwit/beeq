@@ -64,11 +64,37 @@ func (h *Hive) Serve(ln net.Listener) {
 func (h *Hive) Receive(conn net.Conn) {
 	//TODO 先解析第一个包，而且必须是Connect
 	bee := NewBee(conn)
+	var parser packet.Parser
+
+	buf := make([]byte, 1024)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			log.Println(err)
+			break
+		}
+
+		ms := parser.Parse(buf[:n])
+
+		//处理消息
+		//TODO 可以放入队列
+		for _, msg := range ms {
+			h.handle(msg, bee)
+		}
+	}
+
+	_ = bee.Close()
+}
+
+func (h *Hive) Receive2(conn net.Conn) {
+	//TODO 先解析第一个包，而且必须是Connect
+	bee := NewBee(conn)
 
 	bufSize := 6
 	buf := make([]byte, bufSize)
 	of := 0
 	for {
+		//TODO 先解析
 		n, err := conn.Read(buf[of:])
 		if err != nil {
 			log.Println(err)
