@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+func reAlloc(buf []byte, l int) []byte {
+	b := make([]byte, l)
+	copy(b, buf)
+	return b
+}
+
 type Hive struct {
 
 	//Subscribe tree
@@ -20,6 +26,12 @@ type Hive struct {
 
 	//ClientId->Bee
 	bees sync.Map // map[string]*Bee
+
+	onConnect     func(*packet.Connect, *Bee) bool
+	onPublish     func(*packet.Publish, *Bee) bool
+	onSubscribe   func(*packet.Subscribe, *Bee) bool
+	onUnSubscribe func(*packet.UnSubscribe, *Bee)
+	onDisconnect  func(*packet.DisConnect, *Bee)
 }
 
 func NewHive() *Hive {
@@ -79,7 +91,7 @@ func (h *Hive) Receive(conn net.Conn) {
 
 		//读取未读完的包体
 		if packLen > bufSize {
-			buf = ReAlloc(buf, packLen)
+			buf = reAlloc(buf, packLen)
 
 			//直至将全部包体读完
 			o := n
@@ -106,7 +118,7 @@ func (h *Hive) Receive(conn net.Conn) {
 
 		//解析 剩余内容
 		if packLen < bufSize {
-			buf = ReAlloc(buf[packLen:], bufSize - packLen)
+			buf = reAlloc(buf[packLen:], bufSize-packLen)
 			of = bufSize - packLen
 			//TODO 剩余内容可能已经包含了消息，不用再Read，直接解析
 		} else {
@@ -114,7 +126,6 @@ func (h *Hive) Receive(conn net.Conn) {
 		}
 	}
 }
-
 
 func (h *Hive) handle(msg packet.Message, bee *Bee) {
 	switch msg.Type() {
@@ -145,10 +156,17 @@ func (h *Hive) handle(msg packet.Message, bee *Bee) {
 }
 
 func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
-
 	ack := packet.CONNACK.NewMessage().(*packet.Connack)
 
-	//TODO 验证用户名密码
+	//验证用户名密码
+	if h.onConnect != nil {
+		if !h.onConnect(msg, bee) {
+			ack.SetCode(packet.CONNACK_INVALID_USERNAME_PASSWORD)
+			bee.dispatch(ack)
+			//TODO 断开
+			return
+		}
+	}
 
 	var clientId string
 	if len(msg.ClientId()) == 0 {
@@ -171,6 +189,8 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 			if b.conn != nil {
 				//error reject
 				ack.SetCode(packet.CONNACK_UNAVAILABLE)
+				bee.dispatch(ack)
+				//TODO 判断
 				return
 			} else {
 				if !msg.CleanSession() {
@@ -201,6 +221,13 @@ func (h *Hive) handleConnect(msg *packet.Connect, bee *Bee) {
 }
 
 func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
+	//外部验证
+	if h.onPublish != nil {
+		if !h.onPublish(msg, bee) {
+			return
+		}
+	}
+
 	qos := msg.Qos()
 	if qos == packet.Qos0 {
 
@@ -218,7 +245,6 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 	} else {
 		//TODO error
 	}
-
 
 	if err := ValidTopic(msg.Topic()); err != nil {
 		//TODO log
@@ -260,6 +286,17 @@ func (h *Hive) handlePublish(msg *packet.Publish, bee *Bee) {
 func (h *Hive) handleSubscribe(msg *packet.Subscribe, bee *Bee) {
 	ack := packet.SUBACK.NewMessage().(*packet.SubAck)
 	ack.SetPacketId(msg.PacketId())
+
+	//外部验证
+	if h.onSubscribe != nil {
+		if !h.onSubscribe(msg, bee) {
+			//回复失败
+			ack.AddCode(packet.SUB_CODE_ERR)
+			bee.dispatch(ack)
+			return
+		}
+	}
+
 	for _, st := range msg.Topics() {
 		log.Print("Subscribe ", string(st.Topic()))
 		if err := ValidSubscribe(st.Topic()); err != nil {
@@ -285,6 +322,11 @@ func (h *Hive) handleSubscribe(msg *packet.Subscribe, bee *Bee) {
 }
 
 func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
+	//外部验证
+	if h.onUnSubscribe != nil {
+		h.onUnSubscribe(msg, bee)
+	}
+
 	ack := packet.UNSUBACK.NewMessage().(*packet.UnSubAck)
 	for _, t := range msg.Topics() {
 		log.Print("UnSubscribe ", string(t))
@@ -298,6 +340,26 @@ func (h *Hive) handleUnSubscribe(msg *packet.UnSubscribe, bee *Bee) {
 }
 
 func (h *Hive) handleDisconnect(msg *packet.DisConnect, bee *Bee) {
+	if h.onDisconnect != nil {
+		h.onDisconnect(msg, bee)
+	}
+
 	h.bees.Delete(bee.clientId)
 	_ = bee.conn.Close()
+}
+
+func (h *Hive) OnConnect(fn func(*packet.Connect, *Bee) bool) {
+	h.onConnect = fn
+}
+func (h *Hive) OnPublish(fn func(*packet.Publish, *Bee) bool) {
+	h.onPublish = fn
+}
+func (h *Hive) OnSubscribe(fn func(*packet.Subscribe, *Bee) bool) {
+	h.onSubscribe = fn
+}
+func (h *Hive) OnUnSubscribe(fn func(*packet.UnSubscribe, *Bee)) {
+	h.onUnSubscribe = fn
+}
+func (h *Hive) OnDisconnect(fn func(*packet.DisConnect, *Bee)) {
+	h.onDisconnect = fn
 }
