@@ -3,53 +3,53 @@ package beeq
 import (
 	"git.zgwit.com/iot/beeq/packet"
 	"strings"
+	"sync"
 )
 
 type RetainNode struct {
 
 	//Subscribed retains
 	//clientId
-	retains map[string]*packet.Publish
+	//retains map[string]*packet.Publish
+	retains sync.Map
 
 	//Sub level
 	//topic->children
-	children map[string]*RetainNode
-}
-
-func NewRetainNode() *RetainNode {
-	return &RetainNode{
-		retains:  make(map[string]*packet.Publish),
-		children: make(map[string]*RetainNode),
-	}
+	//children map[string]*RetainNode
+	children sync.Map
 }
 
 func (rn *RetainNode) Fetch(topics []string, cb func(clientId string, pub *packet.Publish)) {
 	if len(topics) == 0 {
 		// Publish all matched retains
-		for clientId, pub := range rn.retains {
-			cb(clientId, pub)
-		}
+		rn.retains.Range(func(key, value interface{}) bool {
+			cb(key.(string), value.(*packet.Publish))
+			return true
+		})
 	} else {
 		name := topics[0]
 
 		if name == "#" {
 			//All retains
-			for clientId, pub := range rn.retains {
-				cb(clientId, pub)
-			}
+			rn.retains.Range(func(key, value interface{}) bool {
+				cb(key.(string), value.(*packet.Publish))
+				return true
+			})
 			//And all children
-			for _, sub := range rn.children {
-				sub.Fetch(topics, cb)
-			}
+			rn.children.Range(func(key, value interface{}) bool {
+				value.(*RetainNode).Fetch(topics, cb)
+				return true
+			})
 		} else if name == "+" {
 			//Children
-			for _, sub := range rn.children {
-				sub.Fetch(topics[1:], cb)
-			}
+			rn.children.Range(func(key, value interface{}) bool {
+				value.(*RetainNode).Fetch(topics[1:], cb)
+				return true
+			})
 		} else {
 			// Sub-Level
-			if sub, ok := rn.children[name]; ok {
-				sub.Fetch(topics[1:], cb)
+			if value, ok := rn.children.Load(name); ok {
+				value.(*RetainNode).Fetch(topics[1:], cb)
 			}
 		}
 	}
@@ -58,33 +58,27 @@ func (rn *RetainNode) Fetch(topics []string, cb func(clientId string, pub *packe
 func (rn *RetainNode) Retain(topics []string, clientId string, pub *packet.Publish) *RetainNode {
 	if len(topics) == 0 {
 		// Publish to specific client
-		rn.retains[clientId] = pub
+		rn.retains.Store(clientId, pub)
 		return rn
 	} else {
 		name := topics[0]
 
 		// Sub-Level
-		if _, ok := rn.children[name]; !ok {
-			rn.children[name] = NewRetainNode()
-		}
-		return rn.children[name].Retain(topics[1:], clientId, pub)
+		value, _ := rn.children.LoadOrStore(name, &RetainNode{})
+		return value.(*RetainNode).Retain(topics[1:], clientId, pub)
 	}
 }
 
 type RetainTree struct {
 	//root
-	root *RetainNode
+	root RetainNode
 
 	//tree index
 	//ClientId -> Node (hold Publish message)
-	retains map[string]*RetainNode
+	//retains map[string]*RetainNode
+	retains sync.Map
 }
 
-func NewRetainTree() *RetainTree {
-	return &RetainTree{
-		root: NewRetainNode(),
-	}
-}
 
 func (rt *RetainTree) Fetch(topic []byte, cb func(clientId string, pub *packet.Publish)) {
 	topics := strings.Split(string(topic), "/")
@@ -105,12 +99,13 @@ func (rt *RetainTree) Retain(topic []byte, clientId string, pub *packet.Publish)
 	node := rt.root.Retain(topics, clientId, pub)
 
 	//indexed node
-	rt.retains[clientId] = node
+	rt.retains.Store(clientId, node)
 }
 
 func (rt *RetainTree) UnRetain(clientId string) {
-	if node, ok := rt.retains[clientId]; ok {
-		delete(node.retains, clientId)
-		delete(rt.retains, clientId)
+	if value, ok := rt.retains.Load(clientId); ok {
+		node := value.(*RetainNode)
+		node.retains.Delete(clientId)
+		rt.retains.Delete(clientId)
 	}
 }

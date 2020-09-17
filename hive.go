@@ -19,10 +19,10 @@ func reAlloc(buf []byte, l int) []byte {
 type Hive struct {
 
 	//Subscribe tree
-	subTree *SubTree
+	subTree SubTree
 
 	//Retain tree
-	retainTree *RetainTree
+	retainTree RetainTree
 
 	//ClientId->Bee
 	bees sync.Map // map[string]*Bee
@@ -34,11 +34,9 @@ type Hive struct {
 	onDisconnect  func(*packet.DisConnect, *Bee)
 }
 
+//TODO 添加参数
 func NewHive() *Hive {
-	return &Hive{
-		subTree:    NewSubTree(),
-		retainTree: NewRetainTree(),
-	}
+	return &Hive{}
 }
 
 func (h *Hive) ListenAndServe(addr string) error {
@@ -46,7 +44,7 @@ func (h *Hive) ListenAndServe(addr string) error {
 	if err != nil {
 		return err
 	}
-	h.Serve(ln)
+	go h.Serve(ln)
 	return nil
 }
 

@@ -3,16 +3,19 @@ package beeq
 import (
 	"git.zgwit.com/iot/beeq/packet"
 	"strings"
+	"sync"
 )
 
 type SubNode struct {
 	//Subscribed clients
 	//clientId
-	clients map[string]packet.MsgQos
+	//clients map[string]packet.MsgQos
+	clients sync.Map
 
 	//Sub level
 	//topic->children
-	children map[string]*SubNode
+	//children map[string]*SubNode
+	children sync.Map
 
 	//Multi Wildcard #
 	mw *SubNode
@@ -21,19 +24,13 @@ type SubNode struct {
 	sw *SubNode
 }
 
-func NewSubNode() *SubNode {
-	return &SubNode{
-		clients:  make(map[string]packet.MsgQos),
-		children: make(map[string]*SubNode),
-		//mw: NewSubNode(),
-		//sw: NewSubNode(),
-	}
-}
-
 func (sn *SubNode) Publish(topics []string, subs map[string]packet.MsgQos) {
 	if len(topics) == 0 {
 		// Publish all matched clients
-		for clientId, qos := range sn.clients {
+		sn.clients.Range(func(key, value interface{}) bool {
+			clientId := key.(string)
+			qos := value.(packet.MsgQos)
+
 			if sub, ok := subs[clientId]; ok {
 				//rewrite by larger Qos
 				if sub < qos {
@@ -42,12 +39,15 @@ func (sn *SubNode) Publish(topics []string, subs map[string]packet.MsgQos) {
 			} else {
 				subs[clientId] = qos
 			}
-		}
+
+			return true
+		})
 	} else {
 		name := topics[0]
 		// Sub-Level
-		if sub, ok := sn.children[name]; ok {
-			sub.Publish(topics[1:], subs)
+
+		if sub, ok := sn.children.Load(name); ok {
+			sub.(*SubNode).Publish(topics[1:], subs)
 		}
 		// Multi wildcard
 		if sn.mw != nil {
@@ -62,32 +62,30 @@ func (sn *SubNode) Publish(topics []string, subs map[string]packet.MsgQos) {
 
 func (sn *SubNode) Subscribe(topics []string, clientId string, qos packet.MsgQos) {
 	if len(topics) == 0 {
-		sn.clients[clientId] = qos
+		sn.clients.Store(clientId, qos)
 		return
 	}
 
 	name := topics[0]
 	if name == "#" {
 		if sn.mw == nil {
-			sn.mw = NewSubNode()
+			sn.mw = &SubNode{}
 		}
 		sn.mw.Subscribe(topics[1:1], clientId, qos)
 	} else if name == "+" {
 		if sn.sw == nil {
-			sn.sw = NewSubNode()
+			sn.sw = &SubNode{}
 		}
 		sn.sw.Subscribe(topics[1:], clientId, qos)
 	} else {
-		if _, ok := sn.children[name]; !ok {
-			sn.children[name] = NewSubNode()
-		}
-		sn.children[name].Subscribe(topics[1:], clientId, qos)
+		value, _ := sn.children.LoadOrStore(name, &SubNode{})
+		value.(*SubNode).Subscribe(topics[1:], clientId, qos)
 	}
 }
 
 func (sn *SubNode) UnSubscribe(topics []string, clientId string) {
 	if len(topics) == 0 {
-		delete(sn.clients, clientId)
+		sn.clients.Delete(clientId)
 	} else {
 		name := topics[0]
 		if name == "#" {
@@ -99,17 +97,16 @@ func (sn *SubNode) UnSubscribe(topics []string, clientId string) {
 				sn.sw.UnSubscribe(topics[1:], clientId)
 			}
 		} else {
-			if sub, ok := sn.children[name]; ok {
-				sub.UnSubscribe(topics[1:], clientId)
-			}
+			sn.children.Range(func(key, value interface{}) bool {
+				value.(*SubNode).UnSubscribe(topics[1:], clientId)
+				return true
+			})
 		}
 	}
 }
 
 func (sn *SubNode) ClearClient(clientId string) {
-	if _, ok := sn.clients[clientId]; ok {
-		delete(sn.clients, clientId)
-	}
+	sn.clients.Delete(clientId)
 
 	if sn.mw != nil {
 		sn.mw.ClearClient(clientId)
@@ -118,20 +115,15 @@ func (sn *SubNode) ClearClient(clientId string) {
 		sn.sw.ClearClient(clientId)
 	}
 
-	for _, sub := range sn.children {
-		sub.ClearClient(clientId)
-	}
+	sn.children.Range(func(key, value interface{}) bool {
+		value.(*SubNode).ClearClient(clientId)
+		return true
+	})
 }
 
 type SubTree struct {
 	//tree root
-	root *SubNode
-}
-
-func NewSubTree() *SubTree {
-	return &SubTree{
-		root: NewSubNode(),
-	}
+	root SubNode
 }
 
 func (st *SubTree) Publish(topic []byte, subs map[string]packet.MsgQos) {
